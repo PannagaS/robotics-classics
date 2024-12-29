@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython import embed
 from scipy.stats import multivariate_normal
-from matplotlib.animation import FuncAnimation, FFMpegWriter
+from matplotlib.patches import Ellipse
 
 class Robot:
     def __init__(self, x0, y0, theta0, v, w, delta_t):
@@ -19,10 +19,10 @@ class Robot:
         self.delta_t = delta_t
 
         # Set uncertainty in measurement 
-        self.Q = np.eye(3)*10
+        self.Q = np.diag([1.0, 1.0, 1.0])*0.5
 
         # Set uncertainty in actuation
-        self.R = np.eye(3)
+        self.R = np.diag([0.1, 0.1, 0.1])*1
 
         
         # C = [1, 1, 1]
@@ -32,8 +32,10 @@ class Robot:
             [0, 1, 0],
             [0, 0, 1]
         ])
+
+        self.H_t = np.eye(3)
         
-    
+        
     def update_process_noise(self):
         """
         Update process noise covariance (R) to align with the robot's heading.
@@ -72,23 +74,60 @@ class Robot:
         self.sigma_state = A_kp1@self.sigma_state@A_kp1.transpose() + self.R
 
         return self.mu_state, self.sigma_state
-
     
-    def sensor_model(self, K):
+
+    def non_linear_action_model(self):
+        """
+        update states:
+        g(u(k), mu(k-1)) 3x1 matrix
+        g = [ [x + vcos(theta)*delta_t]
+              [y + vsin(theta)*delta_t]
+              [ theta + w*delta_t    ]]
+        """
+        # replace self.state with self.mu_state but for time being I wrote self.state = self.mu_state 
+        self.state = self.mu_state
+        g = np.array([[self.state[0,0] + self.control[0,0]* np.cos(self.state[2,0]) * self.delta_t],
+                      [self.state[1,0] + self.control[0,0]* np.sin(self.state[2,0]) * self.delta_t],
+                      [self.state[2,0] + self.control[1,0]* self.delta_t]])
+        
+        # calculate jacobian matrix of g 
+        G = np.array([[1,   0,   -self.control[0,0]*np.sin(self.state[2,0])*self.delta_t],
+                      [0,   1,    self.control[0,0]*np.cos(self.state[2,0])*self.delta_t],
+                      [0,   0,   1 ]])
+        
+        self.sigma_state = G*self.sigma_state*G.transpose() + self.R 
+        self.mu_state = g 
+        return self.mu_state, self.sigma_state
+        
+    
+    
+
+    def sensor_model(self, K, z):
         """
         mu_state(k) = mu_state(k) + K*(z(k) - C(k)*mu_state(k))
         sigma_state(k) = sigma_state(k) - K*C(k)*sigma_state(k)
 
         """
-        z_kp1 = self.C@self.mu_state + np.random.normal(0, 0.1, size = (3,1))
+        # self.z_kp1 = self.C@self.mu_state + np.random.normal(0, 0.1, size = (3,1))
+     
 
-        self.mu_state = self.mu_state + K@(z_kp1 - self.C@self.mu_state)
+        self.mu_state = self.mu_state + K@(z - self.C@self.mu_state)
         self.sigma_state = self.sigma_state - K@self.C@self.sigma_state 
         
         return self.mu_state, self.sigma_state
-
-
     
+    def non_linear_sensor_model(self, K_t, z):
+        
+        # self.z_kp1 = self.C@self.mu_state + np.random.normal(0, 0.1, size = (3,1))
+        
+        h_mu_bar = self.mu_state # odometry readings 
+        self.mu_state = self.mu_state + K_t@(z - h_mu_bar) 
+        self.sigma_state = self.sigma_state - K_t@self.H_t@self.sigma_state 
+
+
+        return self.mu_state, self.sigma_state
+
+
     def dynamic_model(self):
         """
         x(k+1) = x(k) + v(k+1)cos(theta(k))*delta_t
@@ -113,25 +152,36 @@ class Robot:
         
         return A, B
     
-        
-    def kalman_filter(self):
+     
+    def kalman_filter(self,z):
 
         # prediction step 
         # call action model
         self.mu_state, self.sigma_state = self.action_model()
 
+         
         # updation step
         # calculate kalman gain
        
         K_t = self.sigma_state @ self.C.transpose() * np.linalg.inv(self.C @ self.sigma_state @ self.C.transpose() + self.Q)
 
         # call sensor model
-        self.mu_state, self.sigma_state = self.sensor_model(K_t)
+        self.mu_state, self.sigma_state = self.sensor_model(K_t,z)
 
         return self.mu_state, self.sigma_state
     
 
-from matplotlib.patches import Ellipse
+    def extended_kalman_filter(self, z):
+
+        self.mu_state, self.sigma_state = self.non_linear_action_model()
+
+        K_t = self.sigma_state @ self.H_t.transpose() * np.linalg.inv(self.H_t @ self.sigma_state @ self.H_t.transpose() + self.Q)
+
+        self.mu_state, self.sigma_state = self.non_linear_sensor_model(K_t, z)
+
+        return self.mu_state, self.sigma_state 
+
+
 
 def plot_covariance_ellipse(mu, sigma, ax, n_std=1, color='green'):
     """
@@ -189,91 +239,86 @@ def plot_covariance_gradient(mu, sigma, ax, grid_size=0.1, cmap='Blues'):
 
 def main():
     # Initial robot state
-    x0, y0, theta0 = 0, 0, 0  # Starting at origin facing right (0 radians)
+    x0, y0, theta0 = 0.0, 0.0, np.pi/2  # Starting at origin facing right (0 radians)
     delta_t = 0.5  # Time step
-    v_initial = 0  # Initial linear velocity
-    w_initial = 0  # Initial angular velocity
+    v = 0.1  # Initial linear velocity
+    w = 0  # Initial angular velocity
 
     # Create Robot instance
-    robot = Robot(x0, y0, theta0, v_initial, w_initial, delta_t)
+    robot = Robot(x0, y0, theta0, v, w, delta_t)
 
     # Define square trajectory waypoints: [x, y, theta]
     waypoints = np.array([
         [0, 0, 0],        
         [0, 10, np.pi/2],  
         [10, 10, np.pi],  
-        [10,0, -np.pi/2], 
+        [10, 0, -np.pi/2], 
         [5, -5, 0], 
         [0, 0, 0]          
     ])
+    
 
     true_state = np.array([x0, y0, theta0]).reshape(3,1)
+    
     # Parameters
     distance_threshold = 0.5 # Stop when within this distance of a waypoint
     max_iterations =  100  # To prevent infinite loops
     trajectory = []  # Store estimated trajectory for visualization
-    Kp = 0.02
-    vmin = 0.2
-    vmax = 1
+    Kp = 1
+    vmin = -0.5
+    vmax = 0.5
     
     plt.ion()  # Turn on interactive mode
     fig, ax = plt.subplots(figsize=(8, 8))
-    
+    # embed()
     sensor_readings = []       # Simulated sensor data
     ground_truth = []          # True robot trajectory
     for waypoint in waypoints:
         for _ in range(max_iterations):
             
-            # Calculate distance and angle to waypoint
-            delta_x = waypoint[0] - robot.mu_state[0, 0]
-            delta_y = waypoint[1] - robot.mu_state[1, 0]
-            distance_to_goal = np.sqrt(delta_x**2 + delta_y**2)
-            desired_theta = np.arctan2(delta_y, delta_x)    
-
-            v = distance_to_goal * Kp
-            v = np.clip(v, vmin, vmax)
-
-            angle_diff = (desired_theta - robot.mu_state[2, 0] + np.pi) % (2 * np.pi) - np.pi  # Wrap angle to [-pi, pi]
             
+
+            # ######################### TRUE STATE OF THE ROBOT WITHOUT SENSOR ERRORS ###########################
+           
+            
+            true_state[0, 0] = true_state[0,0] + v * np.cos(true_state[2, 0]) * delta_t
+            true_state[1, 0] = true_state[1,0] + v * np.sin(true_state[2, 0]) * delta_t
+            true_state[2, 0] = true_state[2,0] + w * delta_t
+            
+
+            ####################### GET THE NOISY STATE (MEASUREMENT) FROM THE ROBOT ###########################
+            sensor_noise = np.random.multivariate_normal([0,0,0], np.diag([0.01,0.01,0.05]))
+            sensor_reading = true_state.flatten() + sensor_noise    
+
+            ####################### RECALCULATE DISTANCE AND ANGLE TO WAYPOINT ###############################
+            # embed()
+            delta_x = waypoint[0] - true_state[0, 0]
+            delta_y = waypoint[1] - true_state[1, 0]
+            distance_to_goal = np.sqrt(delta_x**2 + delta_y**2)
+            desired_theta = np.arctan2(delta_y, delta_x)
+
             # Break if robot is close enough to the waypoint
             if distance_to_goal <= distance_threshold:
                 break
-            
-             
-            w = np.clip(angle_diff / delta_t, -20, 20)  # Dynamic angular velocity
 
-            # #################################################################################
-            # # Calculate error to waypoint
-            # delta_x = waypoint[0] - true_state[0, 0]
-            # delta_y = waypoint[1] - true_state[1, 0]
-            # distance_to_goal = np.sqrt(delta_x**2 + delta_y**2)
-            # if distance_to_goal <= distance_threshold:
-            #     break
+            # ######################## GENERATE CONTROL INPUTS ##############################################
+            v = distance_to_goal * Kp
+            v = np.clip(v, vmin, vmax)
 
-            # # True motion (ground truth)
-            # desired_theta = np.arctan2(delta_y, delta_x)
-            # v = np.clip(distance_to_goal * Kp, vmin, vmax)
-            # w = (desired_theta - true_state[2, 0]) / delta_t
-            # true_state[0, 0] += v * np.cos(true_state[2, 0]) * delta_t
-            # true_state[1, 0] += v * np.sin(true_state[2, 0]) * delta_t
-            # true_state[2, 0] += w * delta_t
-            
+            angle_diff = (desired_theta - true_state[2, 0] + np.pi) % (2 * np.pi) - np.pi  # Wrap angle to [-pi, pi]
+            w = np.clip(angle_diff / delta_t, -2.0, 2.0)
 
-            ####################### GET THE NOISY STATE (MEASUREMENT) FROM THE ROBOT ########
-            sensor_noise = np.random.multivariate_normal([0, 0, 0], np.diag([0.5, 0.5, 0.05]))
-            sensor_reading = true_state.flatten() + sensor_noise
-            sensor_readings.append(sensor_reading)
-    
-            # Update control inputs in robot
+            # ########################## KALMAN FILTER STEP #################################################
             robot.control = np.array([v, w]).reshape(2, 1)
-
-            # Perform Kalman filter step
-            mu_state, sigma_state = robot.kalman_filter()
+            mu_state, sigma_state = robot.kalman_filter(sensor_reading)
+            # mu_state, sigma_state = robot.extended_kalman_filter(sensor_reading)
+             
+            print("{}    {}".format(distance_to_goal, distance_threshold))
 
             # Store estimated state
             trajectory.append(mu_state.flatten())
             ground_truth.append(true_state.flatten())
-            sensor_readings.append(sensor_reading)
+            sensor_readings.append(sensor_reading.flatten())
              
             # Plot the trajectory and covariance in real time
             ax.clear()
@@ -282,15 +327,15 @@ def main():
             ax.grid()
             ax.plot([wp[0] for wp in waypoints], [wp[1] for wp in waypoints], 'rx', markersize=10, label="Waypoints")
             trajectory_array = np.array(trajectory)
-            # sensor_readings_np = np.array(sensor_readings)
-            # ground_truth_np = np.array(ground_truth)
-            # ax.plot(ground_truth_np[:, 0], ground_truth_np[:, 1], 'black', label="Ground Truth Trajectory")
-            # ax.plot(sensor_readings_np[:, 0], sensor_readings_np[:, 1], 'r.', label="Sensor Readings")
+            sensor_readings_np = np.array(sensor_readings)
+            ground_truth_np = np.array(ground_truth)
+            ax.plot(waypoints[:, 0], waypoints[:, 1], 'black', label="Ground Truth Trajectory")
+            ax.plot(sensor_readings_np[:, 0], sensor_readings_np[:, 1], 'r-', label="Sensor Readings")
             ax.plot(trajectory_array[:, 0], trajectory_array[:, 1], 'b-', label="Estimated Trajectory")
             
 
             # Plot covariance ellipse
-            plot_covariance_ellipse(mu_state, sigma_state, ax)
+            # plot_covariance_ellipse(mu_state, sigma_state, ax)
             # plot_covariance_gradient(mu_state, sigma_state, ax)
 
 
