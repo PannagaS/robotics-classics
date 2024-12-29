@@ -51,7 +51,7 @@ kf_line, = ax.plot([], [], label='KF Estimate', color='red')
 sensor_line, = ax.plot([], [], label='Sensor Reading', color='black')
 waypoints = ax.scatter([0, 0, 10, 10, 5, 0], [0, 10, 10, 0, -5, 0], color="red", label="Waypoints")
 
-ax.set_title("Go to Goal with Kalman Filter/EKF")
+ax.set_title("Go to Goal with EKF for a Differential Drive Mobile Robot")
 ax.set_xlabel("X")
 ax.set_ylabel("Y")
 ax.legend()

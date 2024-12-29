@@ -342,7 +342,7 @@ def main():
             ax.legend()
             ax.set_xlabel("X Position")
             ax.set_ylabel("Y Position")
-            ax.set_title("Real-Time Robot Trajectory with Covariance Ellipses")
+            ax.set_title("Go to Goal with EKF for a Differential Drive Mobile Robot")
             plt.pause(0.01)
 
     plt.ioff()  # Turn off interactive mode
