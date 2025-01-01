@@ -1,6 +1,6 @@
 # This is a Robotics Revision Repository (includes both Python and C++ implementation)
 
-## LKF implemented in C++ visualized in RViz
+## LKF implemented in C++, visualized in RViz
 ![LKF-in-C++](https://github.com/PannagaS/robotics-classics/blob/main/assets/RVizPathforLinearKF%20gif.gif)
 ```
 docker run -it --rm --gpus=all -v "C:\Users\panna\Documents\winter_break\robotics-classics\ws:/home/ws/"  --env="DISPLAY=192.168.50.174:0" --env="QT_X11_NO_MITSHM=1" --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw"   osrf/ros:humble-desktop
