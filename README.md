@@ -30,3 +30,7 @@ source install/setup.bash
 ### With covariance ellipse 
 ![KF-with-covariance-ellipse](https://github.com/PannagaS/robotics-classics/blob/main/assets/KF%20with%20ellipse%20gif.gif)
 
+---
+## Particle Filter 
+### Particle Filter implementation in C++ 
+![pf-gif](https://github.com/PannagaS/robotics-classics/blob/main/assets/particle_filter_gif.gif)
