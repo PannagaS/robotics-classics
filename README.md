@@ -1,4 +1,4 @@
-# This is a Robotics Revision Repository (includes both Python and C++ implementation)
+# Sensor Fusion Using Bayesian State Estimation and Filtering Techniques
 
 ## LKF implemented in C++, visualized in RViz
 ![LKF-in-C++](https://github.com/PannagaS/robotics-classics/blob/main/assets/RVizPathforLinearKF%20gif.gif)
